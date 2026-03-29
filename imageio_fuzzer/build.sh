@@ -1,11 +1,8 @@
 #!/bin/bash
 #
-# build.sh — Build the ImageIO fuzzer suite
+# build.sh - Build the ImageIO fuzzer suite
 #
-# Usage:
-#   ./build.sh              # Build everything
-#   ./build.sh fuzz         # Build + start 60-second fuzzing run
-#   ./build.sh overnight    # Build + start long fuzzing run (4 workers)
+# Handles both libFuzzer (local Xcode) and standalone harness (GitHub Actions CI)
 #
 set -e
 
@@ -28,13 +25,34 @@ mkdir -p corpus crashes
 ./seed_generator corpus/
 echo ""
 
-# Step 3: Build fuzzer with ASAN + UBSan
-echo "[3/3] Building fuzzer (ASAN + UBSan + libFuzzer)..."
-clang $COMMON_FLAGS \
-    -fsanitize=fuzzer,address,undefined \
-    -fno-sanitize-recover=undefined \
-    -g -O1 \
-    -o fuzz_imageio fuzz_imageio.m
+# Step 3: Detect libFuzzer availability and build
+echo "[3/3] Building fuzzer..."
+
+if clang -fsanitize=fuzzer -x c -c /dev/null -o /dev/null 2>/dev/null; then
+    echo "      libFuzzer available - building with -fsanitize=fuzzer"
+    clang $COMMON_FLAGS \
+        -fsanitize=fuzzer,address,undefined \
+        -fno-sanitize-recover=undefined \
+        -g -O1 \
+        -o fuzz_imageio fuzz_imageio.m
+else
+    echo "      libFuzzer NOT available - building with standalone harness"
+    # Compile fuzz target as object (no main)
+    clang $COMMON_FLAGS \
+        -fsanitize=address,undefined \
+        -fno-sanitize-recover=undefined \
+        -g -O1 \
+        -c -o fuzz_imageio.o fuzz_imageio.m
+    # Compile standalone harness
+    clang -fsanitize=address,undefined -g -O1 \
+        -c -o standalone_harness.o ../standalone_harness.c
+    # Link together
+    clang $COMMON_FLAGS \
+        -fsanitize=address,undefined \
+        -g -O1 \
+        -o fuzz_imageio fuzz_imageio.o standalone_harness.o
+    rm -f fuzz_imageio.o standalone_harness.o
+fi
 echo "      Done."
 
 echo ""
@@ -46,7 +64,6 @@ echo "Run commands:"
 echo "  Quick test (60s):     ./fuzz_imageio corpus/ -max_len=65536 -timeout=10 -max_total_time=60"
 echo "  Parallel (4 workers): ./fuzz_imageio corpus/ -max_len=65536 -timeout=10 -jobs=4 -workers=4"
 echo "  Overnight:            ./fuzz_imageio corpus/ -max_len=65536 -timeout=10 -jobs=8 -workers=4 -print_final_stats=1"
-echo "  DNG-focused:          ./fuzz_imageio corpus/ -max_len=65536 -timeout=10 -only_ascii=0"
 echo ""
 echo "Crashes saved to: $DIR/crashes/"
 echo ""
