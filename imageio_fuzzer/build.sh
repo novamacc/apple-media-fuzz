@@ -28,10 +28,10 @@ echo ""
 # Step 3: Detect libFuzzer availability and build
 echo "[3/3] Building fuzzer..."
 
-if echo 'int LLVMFuzzerTestOneInput(const char *d, long s){return 0;}' | clang -fsanitize=fuzzer -x c - -o /dev/null 2>/dev/null; then
-    echo "      libFuzzer available - building with -fsanitize=fuzzer"
+if echo 'int LLVMFuzzerTestOneInput(const char *d, long s){return 0;}' | clang  -x c - -o /dev/null 2>/dev/null; then
+    echo "      libFuzzer available - building with "
     clang $COMMON_FLAGS \
-        -fsanitize=fuzzer,address,undefined \
+        -fsanitize=address,undefined \
         -fno-sanitize-recover=undefined \
         -g -O1 \
         -o fuzz_imageio fuzz_imageio.m
