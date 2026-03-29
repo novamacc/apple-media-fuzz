@@ -22,7 +22,7 @@ cp corpus/minimized_poc_v2.aiff corpus_audio/ 2>/dev/null || true
 echo ""
 
 echo "[3/3] Building fuzzer..."
-if clang -fsanitize=fuzzer -x c -c /dev/null -o /dev/null 2>/dev/null; then
+if echo 'int LLVMFuzzerTestOneInput(const char *d, long s){return 0;}' | clang -fsanitize=fuzzer -x c - -o /dev/null 2>/dev/null; then
     echo "      libFuzzer available - building with -fsanitize=fuzzer"
     clang $COMMON \
         -fsanitize=fuzzer,address,undefined \
