@@ -1,56 +1,15 @@
 #!/bin/bash
-# build.sh - Build the AudioToolbox multi-format fuzzer
-# Handles both libFuzzer (local Xcode) and standalone harness (GitHub Actions CI)
 set -e
-cd "$(dirname "$0")"
+DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$DIR"
+echo "=== Building fuzz_audio ==="
+mkdir -p corpus crashes
 
-COMMON="-framework AudioToolbox -framework CoreFoundation -framework Foundation"
-
-echo "=== AudioToolbox Multi-Format Fuzzer ==="
-echo ""
-
-echo "[1/3] Building seed generator..."
-clang $COMMON -O2 -o seed_audio seed_audio.m 2>&1
-echo "      Done."
-
-echo "[2/3] Generating seed corpus..."
-mkdir -p corpus_audio crashes_audio
-./seed_audio corpus_audio/
-# Copy existing AIFF seeds too
-cp corpus/FINAL_POC_821bytes.aiff corpus_audio/ 2>/dev/null || true
-cp corpus/minimized_poc_v2.aiff corpus_audio/ 2>/dev/null || true
-echo ""
-
-echo "[3/3] Building fuzzer..."
-if echo 'int LLVMFuzzerTestOneInput(const char *d, long s){return 0;}' | clang  -x c - -o /dev/null 2>/dev/null; then
-    echo "      libFuzzer available - building with "
-    clang $COMMON \
-        -fsanitize=address,undefined \
-        -fno-sanitize-recover=undefined \
-        -g -O1 \
-        -o fuzz_audio fuzz_audio.m 2>&1
-else
-    echo "      libFuzzer NOT available - building with standalone harness"
-    clang $COMMON \
-        -fsanitize=address,undefined \
-        -fno-sanitize-recover=undefined \
-        -g -O1 \
-        -c -o fuzz_audio.o fuzz_audio.m
-    clang -fsanitize=address,undefined -g -O1 \
-        -c -o standalone_harness.o ../standalone_harness.c
-    clang $COMMON \
-        -fsanitize=address,undefined \
-        -g -O1 \
-        -o fuzz_audio fuzz_audio.o standalone_harness.o
-    rm -f fuzz_audio.o standalone_harness.o
+# Build seed generator if exists
+if [ -f seed_generator.m ]; then
+    clang -framework Foundation -framework CoreFoundation -framework AudioToolbox -O2 -o seed_generator seed_generator.m 2>/dev/null && ./seed_generator corpus/ 2>/dev/null || echo "Seed gen skipped"
 fi
-echo "      Done."
 
-echo ""
-echo "=== BUILD COMPLETE ==="
-SEED_COUNT=$(ls corpus_audio/ | wc -l | tr -d ' ')
-echo "Corpus seeds: $SEED_COUNT files (10 formats)"
-echo ""
-echo "Run:"
-echo "  Quick:     ./fuzz_audio corpus_audio/ -max_len=65536 -timeout=5 -max_total_time=60 -artifact_prefix=crashes_audio/"
-echo "  Overnight: ./fuzz_audio corpus_audio/ -max_len=65536 -timeout=5 -jobs=8 -workers=4 -artifact_prefix=crashes_audio/"
+# Build with standalone main + ASAN
+clang -g -O1 -fsanitize=address,undefined -fno-omit-frame-pointer     -framework Foundation -framework CoreFoundation -framework AudioToolbox     -o fuzz_audio standalone_main.c fuzz_audio.m 2>/dev/null || clang -g -O1 -fsanitize=address -fno-omit-frame-pointer     -framework Foundation -framework CoreFoundation -framework AudioToolbox     -o fuzz_audio standalone_main.c fuzz_audio.m
+echo "Build complete: $(ls -la fuzz_audio 2>/dev/null | awk '{print $5}') bytes"

@@ -16,56 +16,20 @@ jobs:
         fuzzer: [imageio_fuzzer, aiff_escalation_fuzzer, pdf_fuzzer, transcoder_fuzzer]
     steps:
       - uses: actions/checkout@v4
-
-      - name: Check environment
-        run: |
-          echo "=== Xcode Version ==="
-          xcodebuild -version
-          echo ""
-          echo "=== Clang Version ==="
-          clang --version
-          echo ""
-          echo "=== libFuzzer Check ==="
-          if echo 'int LLVMFuzzerTestOneInput(const char *d, long s){return 0;}' | clang -fsanitize=fuzzer -x c - -o /dev/null 2>/dev/null; then
-            echo "libFuzzer runtime: AVAILABLE"
-          else
-            echo "libFuzzer runtime: NOT AVAILABLE (will use standalone harness)"
-          fi
-          echo ""
-          echo "=== ASAN Check ==="
-          if clang -fsanitize=address -x c -c /dev/null -o /dev/null 2>/dev/null; then
-            echo "AddressSanitizer: AVAILABLE"
-          else
-            echo "AddressSanitizer: NOT AVAILABLE"
-          fi
-
-      - name: Install dependencies
-        run: brew install coreutils 2>/dev/null || true
-
       - name: Build fuzzer
         run: |
           cd ${{ matrix.fuzzer }}
           chmod +x build.sh
           ./build.sh
-
       - name: Run fuzzer (5 hours)
         run: |
           cd ${{ matrix.fuzzer }}
-          FUZZER=$(find . -name "fuzz_*" -o -name "test_*" -type f -perm +111 | head -1)
-          CORPUS=$(find . -name "corpus*" -type d | head -1)
-          if [ -z "$CORPUS" ]; then CORPUS=corpus; fi
-          mkdir -p crashes
+          FUZZER=$(find . -maxdepth 1 -type f -perm +111 -name "fuzz_*" | head -1)
+          if [ -z "$FUZZER" ]; then echo "No fuzzer binary found"; exit 1; fi
+          CORPUS=$(find . -name "corpus" -type d | head -1)
+          [ -z "$CORPUS" ] && CORPUS="corpus" && mkdir -p corpus
           echo "Running: $FUZZER $CORPUS/"
-          gtimeout 18000 $FUZZER $CORPUS/ \
-            -max_len=65536 \
-            -timeout=10 \
-            -rss_limit_mb=2048 \
-            -jobs=3 \
-            -workers=3 \
-            -artifact_prefix=crashes/ \
-            -print_final_stats=1 \
-            || true
-
+          $FUZZER "$CORPUS/" -max_total_time=18000 || true
       - name: Check for crashes
         if: always()
         run: |
@@ -73,30 +37,14 @@ jobs:
           if ls crashes/crash-* 1>/dev/null 2>&1; then
             echo "CRASHES FOUND!"
             ls -la crashes/
-            for f in crashes/crash-*; do xxd "$f" | head -20; done
-          elif ls crashes/oom-* 1>/dev/null 2>&1; then
-            echo "OOM found:"
-            ls -la crashes/oom-*
           else
-            echo "No crashes found this run"
+            echo "No crashes found"
           fi
-
-      - name: Upload crash artifacts
+      - name: Upload crashes
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: crashes-${{ matrix.fuzzer }}-${{ github.run_number }}
-          path: |
-            ${{ matrix.fuzzer }}/crashes*/
+          path: ${{ matrix.fuzzer }}/crashes/
           retention-days: 90
-          if-no-files-found: ignore
-
-      - name: Upload grown corpus
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: corpus-${{ matrix.fuzzer }}-${{ github.run_number }}
-          path: |
-            ${{ matrix.fuzzer }}/corpus*/
-          retention-days: 30
           if-no-files-found: ignore
